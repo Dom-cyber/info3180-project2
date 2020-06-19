@@ -16,16 +16,8 @@ class RegistrationForm(FlaskForm):
     password = PasswordField('Password', validators=[DataRequired()])
     photo = FileField('Profile Photo', validators=[FileRequired(), FileAllowed(['jpg', 'png', 'jpeg', 'Images only!'])])
 
-class PostForm(FlaskForm):
-    photo = FileField('Photo', validators=[FileRequired(), FileAllowed(['jpg','png','jpeg', 'Images only!']) ])
-    caption = StringField('Caption', validators=[DataRequired()])
-
-class LoginForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
 
     
-
 
 
     def validate_username(self, username):
