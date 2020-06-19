@@ -6,9 +6,9 @@ from app import app
 from app import db
 from app import csrf
 from datetime import datetime
-from app.forms import RegistrationForm, PostForm, LoginForm
+from app.forms import RegistrationForm
 from flask import render_template, flash, request,make_response, redirect, url_for, jsonify, json,session
-from app.models import Users, Posts, Likes, Follows
+from app.models import Users
 from flask_login import current_user, login_user,logout_user
 from sqlalchemy import desc
 from werkzeug.utils import secure_filename
