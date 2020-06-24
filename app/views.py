@@ -6,9 +6,9 @@ from app import app
 from app import db
 from app import csrf
 from datetime import datetime
-from app.forms import RegistrationForm
+from app.forms import RegistrationForm, PostForm, LoginForm
 from flask import render_template, flash, request,make_response, redirect, url_for, jsonify, json,session
-from app.models import Users
+from app.models import Users, Posts, Likes, Follows
 from flask_login import current_user, login_user,logout_user
 from sqlalchemy import desc
 from werkzeug.utils import secure_filename
@@ -16,9 +16,10 @@ from functools import wraps
 from flask import _request_ctx_stack
 
 
+
 def requires_auth(f):
   @wraps(f)
-  def decorated_function(*args, **kwargs):
+  def decorated(*args, **kwargs):
     auth = request.headers.get('Authorization', None)
     if not auth:
       return jsonify({'code': 'authorization_header_missing', 'description': 'Authorization header is expected'}), 401
@@ -42,29 +43,148 @@ def requires_auth(f):
         return jsonify({'code': 'token_invalid_signature', 'description': 'Token signature is invalid'}), 401
 
     return f(*args, **kwargs)
-  return decorated_function
+
+  return decorated
 
 @app.route('/api/users/register', methods=['POST'])
 def register():
     form = RegistrationForm()
-    if request.method=="POST" and form.validate_on_submit():
-        username=form.username.data
-        password=form.password.data
-        firstname=form.firstname.data
-        lastname=form.lastname.data
-        location=form.location.data
-        email=form.email.data
-        biography=form.biography.data
-        photourl=form.photo.data 
-        filename=secure_filename(photourl.filename)
-        photourl.save(os.path.join(app.config['UPLOAD_FOLDER'],filename))
+    if request.method == "POST" and form.validate_on_submit():
+        username = form.username.data
+        password = form.password.data
+        firstname = form.firstname.data
+        lastname = form.lastname.data
+        location = form.location.data    
+        email = form.email.data
+        biography = form.biography.data
+        imageurl = form.photo.data 
+
+        filename = secure_filename(imageurl.filename)
+        imageurl.save(os.path.join(app.config['UPLOAD_FOLDER'],filename))
+
         user = Users(firstname,lastname,username,email,location,biography,filename)
         user.set_password(password)
+
         db.session.add(user)
         db.session.commit()
-        return jsonify({"message": "User successfully registered"}) 
+        return jsonify({'message': 'Congrats! you have been successfully registered!'}) 
     return jsonify(error= form_errors(form)),201
 
+@app.route('/api/users/<user_id>/posts',methods=['GET','POST'])
+@requires_auth
+def userpost(user_id):
+    form = PostForm()
+    token = request.headers['Authorization'].split()[1]
+    current_id = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])['id']
+    if request.method == 'POST' and form.validate_on_submit():
+        caption = form.caption.data
+        
+        photo = form.photo.data
+        filename = photo.filename
+        photo.save(os.path.join(
+            app.config['UPLOAD_FOLDER'], filename
+        ))
+        
+        
+        post = Posts(user_id, filename, caption)
+
+        db.session.add(post)
+        db.session.commit()
+        return jsonify({'message': 'Successfully created a post!'}),201
+  
+    allpost=[]
+    posts=Posts.query.filter_by(user_id=user_id).order_by(desc(Posts.id)).all()
+    user=Users.query.filter_by(id=user_id).first()
+    follow= Follows.query.filter_by(user_id=current_id,follower_id=user_id).count()
+    if (follow==0):
+        follow="not following"
+    else:
+        follow="following"
+    followcount= Follows.query.filter_by(follower_id=user_id).count()
+    postcount =Posts.query.filter_by(user_id=user_id).count()
+
+    for post in posts:
+        # getusername of post creator
+        
+        likes= Likes.query.filter_by(post_id=post.id).count()
+        allpost.append({'id': post.id , 'user_id': post.user_id, 
+            'photo': post.photo, 'caption': post.caption,
+            'no_likes': likes, 'created_on': post.created_on})
+
+    return jsonify({'postcount':postcount,'followcount':followcount,'follow':follow,'user_id':user.id,'username':user.username,'firstname':user.firstname,'lastname':user.lastname,'location':user.location,'joinedon':user.joined_on.strftime('%B %Y'),'biography':user.biography,'photo':user.display_photo,'posts':allpost}),200
+
+
+@app.route('/api/posts', methods=['GET'])
+@requires_auth
+def posts():
+    allpost=[]
+    posts=Posts.query.order_by(desc(Posts.id)).all()
+    token = request.headers['Authorization'].split()[1]
+    current_id = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])['id']
+    for post in posts:
+        # getusername of post creator
+        user=Users.query.filter_by(id=post.user_id).first()
+        likes= Likes.query.filter_by(post_id=post.id).count()
+        liked  = Likes.query.filter_by(post_id=post.id,user_id=current_id).count()
+        if(liked==0):
+            liked="not liked"
+        else:
+            liked="liked"
+        allpost.append({'post_id':post.id,'username': user.username , 'user_id': post.user_id, 
+            'photo': post.photo, 'caption': post.caption,
+            'no_likes': likes, 'created_on': post.created_on.strftime('%d %B %Y'),'display_photo':user.display_photo,'liked':liked})
+
+    return jsonify({"posts":allpost}),200
+
+@app.route('/api/posts/<post_id>/like',methods=['POST'])
+@requires_auth
+def addlikes(post_id):
+    token = request.headers['Authorization'].split()[1]
+    current_id = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])['id']
+    like = Likes(current_id,post_id)
+    db.session.add(like)
+    db.session.commit()
+
+    return jsonify({"message":"liked"}),201
+
+
+@app.route('/api/users/<user_id>/follow',methods=['POST'])
+@requires_auth
+def followuser(user_id):
+    token = request.headers['Authorization'].split()[1]
+    current_id = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])['id']
+    follow=Follows(current_id,user_id)
+    db.session.add(follow)
+    db.session.commit()
+    followcount= Follows.query.filter_by(follower_id=user_id).count()
+
+    return jsonify({"message":"followed user"}),201
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    # if current_user.is_authenticated:
+    #     return redirect(url_for('index'))
+    form = LoginForm()
+    if request.method == "POST" and form.validate_on_submit():
+        username=form.username.data
+        user = Users.query.filter_by(username=form.username.data).first()
+        if user is None or not user.check_password(form.password.data):
+            # flash('Invalid username or password')
+            # return redirect(url_for('login'))
+            return jsonify({"message": "Username or Password Incorrect"}) 
+
+        # login_user(user)
+        token = jwt.encode({'id': user.id, 'username':username}, app.config['SECRET_KEY'], algorithm='HS256').decode('utf-8')
+        session['userid']=user.id
+        return jsonify({'token': token, 'message': 'User successfully logged in!','id':user.id}) ,200
+    return jsonify(error= form_errors(form)),200
+
+
+@app.route('/api/auth/logout')
+@requires_auth
+def logout():
+    logout_user()
+    return jsonify({"message": "User successfully logged out"}),200
 
 
 @app.route('/', defaults={'path': ''})
@@ -79,6 +199,8 @@ def index(path):
     return render_template('index.html')
 
 
+# Here we define a function to collect form errors from Flask-WTF
+# which we can later use
 def form_errors(form):
     error_messages = []
     """Collects form errors"""
@@ -93,7 +215,11 @@ def form_errors(form):
     return error_messages
 
 
-#The functions below should be applicable to all Flask apps.
+###
+# The functions below should be applicable to all Flask apps.
+###
+
+
 @app.route('/<file_name>.txt')
 def send_text_file(file_name):
     """Send your static text file."""
